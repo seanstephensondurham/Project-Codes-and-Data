@@ -1,2 +1,2 @@
 # Project-Codes
-Codes (R/matlab) used in project
+Contained in this folder are copies of all code used in examples or exercises in my project report
