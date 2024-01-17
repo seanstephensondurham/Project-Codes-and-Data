@@ -1,0 +1,49 @@
+library('gurobi')
+library('Matrix')
+
+start = 25 # harrow and wealdstone
+finish = 384 # reading
+
+thePath = getwd()
+arcs = as.matrix(read.csv(paste0(thePath,"/Station distances.csv"),sep=";", header=FALSE)) # loads the data
+number_of_arcs = dim(arcs)[1] #number of arcs
+station_names = as.matrix(read.csv(paste0(thePath,"/Underground Stations.csv"),sep=";", header=FALSE)) # loads the data from specified folder
+number_of_stations = length(station_names[,1]) # number of stations
+
+n = rep(0,number_of_stations) # construct vector of exiting flow - initially all 0 as only start/end nodes require non-zero total flow
+n[c(start,finish)]=c(-1,1) #changes start/end entries to necessary flows - note that start represents eg the 26th entry if we start from epping - they are variables
+
+#way to change individual entries - n[4]=5 changes entry 4 to value 5
+
+# construct node-incidence matrix: initially a zero matrix with rows representing arcs and cols representing stations
+#replicate function repeats 2nd entry as many times as stipulated in first entry
+Nabla = replicate(number_of_stations,numeric(number_of_arcs)) 
+
+for (i in 1:number_of_arcs){
+Nabla[i,arcs[i,1]]=-1
+Nabla[i,arcs[i,2]]=1
+}
+
+Phi = arcs[,3] # construct distance vector - contains 3rd col of station distances spreadsheet - effectively the cost function of the system
+
+# solve LP via Gurobi - see report for description
+result = gurobi ( list(A=t(Nabla),obj=Phi,modelsense='min',rhs=n,sense='=',start=matrix(0,nbArcs,1)), params=NULL)
+pi = result$x # isolates required output
+distance = result$objval #isolates required output
+
+# deduce minimal distance path:
+arrived = FALSE
+number_of_stops = 0
+i = start # begin from specified starting station
+writeLines(paste0(number_of_stops ,": ",station_names[i]))
+eqpath = which(pi>0) #arcs with entry 1 i.e used in path
+while(arrived == FALSE)
+{ 
+  number_of_stops = number_of_stops + 1
+  leavingi = which(Nabla[,i]==-1) #nodes connected to i
+  a = intersect(eqpath,leavingi)[1] #which node from above lies on path
+  j = which(Nabla[a,]==1)[1] #which node comes on path after a
+  writeLines(paste0(number_of_stops ,": ", station_names[j])) #writes station name
+  i = j #in order to start process from next node along
+  if(j==finish) {arrived = TRUE}  #end when reach destination node
+}
