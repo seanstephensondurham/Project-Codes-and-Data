@@ -1,8 +1,9 @@
 library('gurobi')
 library('Matrix')
+library('stringi')
 
-start = 25 # harrow and wealdstone
-finish = 384 # reading
+start = 204 # wembley park
+finish = 1 # elephant and castle
 
 thePath = getwd()
 arcs = as.matrix(read.csv(paste0(thePath,"/Station distances.csv"),sep=";", header=FALSE)) # loads the data
@@ -37,13 +38,28 @@ number_of_stops = 0
 i = start # begin from specified starting station
 writeLines(paste0(number_of_stops ,": ",station_names[i]))
 eqpath = which(pi>0) #arcs with entry 1 i.e used in path
+previous_station = station_names[i]
+current_station = station_names[i]
+
 while(arrived == FALSE)
 { 
   number_of_stops = number_of_stops + 1
   leavingi = which(Nabla[,i]==-1) #nodes connected to i
   a = intersect(eqpath,leavingi)[1] #which node from above lies on path
   j = which(Nabla[a,]==1)[1] #which node comes on path after a
+
+
+  previous_station = current_station
+  current_station = station_names[j]
+  dash_location = unlist(gregexpr('-', current_station))[1]
+  if(dash_location != -1) 
+  {if(substr(current_station,1,dash_location) == substr(previous_station,1,dash_location))
+  {writeLines(paste0("CHANGE UNDERGROUND LINE at ",substr(previous_station,1,(dash_location-2)),":" ,substr(previous_station,(dash_location +1),stri_length(previous_station)), " to" ,substr(current_station,(dash_location +1),stri_length(current_station))))}}
+  
+
   writeLines(paste0(number_of_stops ,": ", station_names[j])) #writes station name
+  
+
   i = j #in order to start process from next node along
   if(j==finish) {arrived = TRUE}  #end when reach destination node
 }
