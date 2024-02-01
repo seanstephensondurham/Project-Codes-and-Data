@@ -1,80 +1,157 @@
-library('gurobi') # used to solve the linear program
-library('Matrix') # for setting up objects in required way
-library('stringi') # for manipulating strings in route print
+# --------------------------- LONDON UNDERGROUND CODE ----------------------------
+# -- USER REQUIRED TO DOWNLOAD RELEVANT DATA FILES PRIOR TO RUNNING THE PROGRAM --
+# ----------- FILES REQUIRED: "LUG STATION DISTANCES", "LUG STATIONS" ------------
+# ------- CHANGE FILE DIRECTORY LINES BELOW TO ACCESS CHOSEN FILE LOCATION -------
+# --------------------------- GUROBI SOFTWARE REQUIRED ---------------------------
+
+
+library('gurobi')
+library('Matrix')
+library('stringi')
 
 route = NULL # to be used for printing full route at the end
+
 
 start = 131 # monument
 finish = 247 # watford
 
+
+
+
+# IMPORTING DATA - files can be found in relevant GitHub folder
+
 thePath = getwd()
-arcs = as.matrix(read.csv(paste0(thePath,"/Station distances.csv"),sep=";", header=FALSE)) # loads the data from specified folder
+arcs = as.matrix(read.csv(paste0(thePath,"/Station distances.csv"),sep=";", header=FALSE))
 number_of_arcs = dim(arcs)[1] #number of arcs
-station_names = as.matrix(read.csv(paste0(thePath,"/Underground Stations.csv"),sep=";", header=FALSE)) # loads the data from specified folder
+station_names = as.matrix(read.csv(paste0(thePath,"/Underground Stations.csv"),sep=";", header=FALSE))
 number_of_stations = length(station_names[,1]) # number of stations
+
+
+
+
+#CONSTRUCTING LINEAR ALGEBRA
 
 n = rep(0,number_of_stations) # construct vector of exiting flow - initially all 0 as only start/end nodes require non-zero total flow
 n[c(start,finish)]=c(-1,1) #changes start/end entries to necessary flows - note that start represents eg the 26th entry if we start from epping - they are variables
 
+
 #way to change individual entries - n[4]=5 changes entry 4 to value 5
+
 
 # construct node-incidence matrix: initially a zero matrix with rows representing arcs and cols representing stations
 #replicate function repeats 2nd entry as many times as stipulated in first entry
 Nabla = replicate(number_of_stations,numeric(number_of_arcs)) 
 
 for (i in 1:number_of_arcs){
-Nabla[i,arcs[i,1]]=-1
-Nabla[i,arcs[i,2]]=1
+	Nabla[i,arcs[i,1]]=-1
+	Nabla[i,arcs[i,2]]=1
 }
 
 Phi = arcs[,3] # construct distance vector - contains 3rd col of station distances spreadsheet - effectively the cost function of the system
 
-# solve LP via Gurobi - see report for description
-result = gurobi(list(A=t(Nabla),obj=Phi,modelsense='min',rhs=n,sense='=',start=matrix(0,number_of_arcs,1)), params=NULL)
-pi = result$x # isolates required output
-distance = result$objval #isolates required output
 
-# deduce minimal distance path:
+
+
+#SOLVING VIA GUROBI - see report for description
+
+result = gurobi(
+	list(
+		A=t(Nabla),
+		obj=Phi,
+		modelsense='min',
+		rhs=n,
+		sense='=',
+		start=matrix(0,number_of_arcs,1)
+	),
+	params=NULL
+)
+
+
+pi = result$x # isolates required output - transport map pi
+distance = result$objval #isolates required output - total distance (generalised to total cost
+
+
+
+
+#FINDING OPTIMAL ROUTE
+
 arrived = FALSE
 number_of_stops = 0
 i = start # begin from specified starting station
+
+# unhash following line if user wants station by station route
+#writeLines(paste0(number_of_stops ,": ",station_names[i]))
+
 eqpath = which(pi>0) #arcs with entry 1 i.e used in path
 previous_station = station_names[i]
 current_station = station_names[i]
 
+
 # manipulating string appearance for ease of printing route at the end
-if (unlist(gregexpr('-', current_station))[1] != -1)
-{last_change = substr(station_names[i],1,(unlist(gregexpr('-', station_names[i]))[length(unlist(gregexpr('-', station_names[i])))]-2))} else {last_change = station_names[i]}
+if (unlist(gregexpr('-', current_station))[1] != -1){
+	last_change = substr(station_names[i],1,
+	(unlist(gregexpr('-', station_names[i]))[length(unlist(gregexpr('-', station_names[i])))]-2))
+} else {
+	last_change = station_names[i]
+}
+
+
 
 while(arrived == FALSE)
 { 
-  number_of_stops = number_of_stops + 1
-  leavingi = which(Nabla[,i]==-1) #nodes connected to i
-  a = intersect(eqpath,leavingi)[1] #which node from above lies on path
-  j = which(Nabla[a,]==1)[1] #which node comes on path after a
+	number_of_stops = number_of_stops + 1
+  	leavingi = which(Nabla[,i]==-1) #nodes connected to i
+  	a = intersect(eqpath,leavingi)[1] #which node from above lies on path
+  	j = which(Nabla[a,]==1)[1] #which node comes on path after a
 
-  # for manipulating string for printing route
-  previous_station = current_station
-  current_station = station_names[j]
-  dash_location = unlist(gregexpr('-', current_station))[1]
+# for manipulating string for printing route
+  	previous_station = current_station
+  	current_station = station_names[j]
+  	dash_location = unlist(gregexpr('-', current_station))[1]
   
-  if(dash_location != -1) 
-  {if(substr(current_station,1,dash_location) == substr(previous_station,1,dash_location))
-  {route = paste(route,"\n",(paste0(last_change," to ",substr(previous_station,1,(dash_location-2)))))}}
-    
-  if(dash_location != -1) 
-  {if(substr(current_station,1,dash_location) == substr(previous_station,1,dash_location))
-  {route = paste(route,"\n",(paste0("CHANGE LINE at ",substr(previous_station,1,(dash_location-2)),":" ,substr(previous_station,(dash_location +1),stri_length(previous_station)), " to" ,substr(current_station,(dash_location +1),stri_length(current_station)))))}}
+  	if(dash_location != -1) {
+		if(substr(current_station,1,dash_location) == substr(previous_station,1,dash_location)){
+			route = paste(route,"\n",(paste0(last_change," to ",substr(previous_station,1,(dash_location-2)))))
+		}
+	}
 
-  if(dash_location != -1) 
-  {if(substr(current_station,1,dash_location) == substr(previous_station,1,dash_location))
-  {last_change = substr(station_names[i],1,(dash_location -2))}}
+  	if(dash_location != -1) {
+		if(substr(current_station,1,dash_location) == substr(previous_station,1,dash_location)){
+			route = paste(route,"\n",(paste0("CHANGE LINE at ",substr(previous_station,1,(dash_location-2)),":" ,
+			substr(previous_station,(dash_location +1),stri_length(previous_station)), " to" ,
+			substr(current_station,(dash_location +1),stri_length(current_station)))))
+		}
+	}
 
-  i = j #in order to start process from next node along
-  if(j==finish) {arrived = TRUE}  #end when reach destination node
+
+
+	if(dash_location != -1) {
+		if(substr(current_station,1,dash_location) == substr(previous_station,1,dash_location)){
+			last_change = substr(station_names[i],1,(dash_location -2))
+		}
+	}
+
+# unhash following line if user wants station by station route
+	#writeLines(paste0(number_of_stops ,": ", station_names[j])) #writes station name
+  
+
+	i = j #in order to start process from next node along
+	if(j==finish) {
+		arrived = TRUE
+	}  #end when reach destination node
 }
 
-if (unlist(gregexpr('-', current_station))[length(unlist(gregexpr('-', current_station)))] != -1)
-{route = paste(route,"\n",paste0(last_change," to ",substr(station_names[finish],1,(unlist(gregexpr('-', current_station))[length(unlist(gregexpr('-', current_station)))]-2))),"\n","\n")} else {route = paste(route,"\n",paste0(last_change," to ", station_names[finish]),"\n","\n")}
+
+if (unlist(gregexpr('-', current_station))[length(unlist(gregexpr('-', current_station)))] != -1){
+	route = paste(route,"\n",paste0(last_change," to ",substr(station_names[finish],1,
+	(unlist(gregexpr('-', current_station))[length(unlist(gregexpr('-', current_station)))]-2))),"\n","\n")
+} else {
+	route = paste(route,"\n",paste0(last_change," to ", station_names[finish]),"\n","\n")
+}
+
+
 
 cat(route)
+
+
+
