@@ -1,0 +1,57 @@
+library("Matrix")
+library("gurobi")
+
+#Phi cost matrix representing direct transportation per unit
+#p number of units per wholesaler normalised to total mass is 1
+#q similar for supermarket demand
+#normalise to 1 for our probabilistic convention, one can test and show that solutions are the same up to a multiplicative constant when we do not normalise
+
+Phi = matrix(c(0.3,0.45,0.2,0.15,0.67,1.01,0.54,1.05,0.76,0.43,0.54,1.23,0.56,0.75,0.34,0.65,0.89,1.05,0.76,0.87,0.97),nrow=7,byrow=FALSE)
+p = c(350/1500,665/1500,485/1500)
+q = c(134/1500,357/1500,412/1500,87/1500,125/1500,165/1500,220/1500)
+
+m = length(p)
+n = length(q)
+d = c(p,q)
+c = c(Phi)
+
+A1 = kronecker(sparseMatrix(1:m,1:m),matrix(1,1,n))
+A2 = kronecker(matrix(1,1,m),sparseMatrix(1:n,1:n))
+A = rbind2(A1,A2)
+
+result = gurobi(list(A=A,obj=c,modelsense="min",rhs=d,sense="="))
+vars = matrix(result$x,nrow=m,byrow=TRUE)
+total_cost = result$objval
+duals = result$pi #duals variables - cost charged by 3rd party logistics firm
+
+
+#non normalised version - vars is the same up to multiplication by 1500
+
+pfull = c(350,665,485)
+qfull = c(134,357,412,87,125,165,220)
+dfull = c(pfull,qfull)
+
+resultfull = gurobi(list(A=A,obj=Phi,modelsense="min",rhs=dfull,sense="="))
+varsfull = matrix(resultfull$x,nrow=m,byrow=TRUE)
+total_costfull = resultfull$objval
+dualsfull = resultfull$pi #duals variables - cost charged by 3rd party logistics firm
+
+u = duals[1:length(pfull)]
+v = duals[(length(pfull)+1):length(dfull)]
+
+check = TRUE
+if (all.equal(round(rowSums(vars)-p,10),rep(0,m)) != TRUE){check = FALSE}
+
+if (all.equal(round(colSums(vars)-q,10),rep(0,n)) != TRUE){check = FALSE}
+
+comp = which(t(vars)!=0)
+for (i in 1:length(comp)){
+	rowi = comp[i] %% n
+	if (rowi == 0){rowi = n}
+	colj = (comp[i] %/% n)
+	if (comp[i] %% n != 0){colj = colj + 1}
+	if (round(v[rowi] + u[colj] - Phi[rowi,colj],10) !=0){check = FALSE}
+	#print(round(v[rowi] + u[colj] - Phi[rowi,colj],10))
+}
+
+print(check)
