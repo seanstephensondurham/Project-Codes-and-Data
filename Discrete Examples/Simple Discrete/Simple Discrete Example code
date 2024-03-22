@@ -1,7 +1,12 @@
+# ---------------- BASIC DISCRETE EXAMPLE CODE ----------------
+# ----------------- GUROBI SOFTWARE REQUIRED ------------------
+
+
+
 library("Matrix")
 library("gurobi")
 
-#Phi cost matrix representing direct transportation per unit
+#Phi cost matrix representing direct transportation per unit (values chosen arbitrarily)
 #p number of units per wholesaler normalised to total mass is 1
 #q similar for supermarket demand
 #normalise to 1 for our probabilistic convention, one can test and show that solutions are the same up to a multiplicative constant when we do not normalise
@@ -15,26 +20,53 @@ n = length(q)
 d = c(p,q)
 c = c(Phi)
 
+# Constructing Nabla as described in report - using properties of the Kronecker product
 A1 = kronecker(sparseMatrix(1:m,1:m),matrix(1,1,n))
 A2 = kronecker(matrix(1,1,m),sparseMatrix(1:n,1:n))
 A = rbind2(A1,A2)
 
-result = gurobi(list(A=A,obj=c,modelsense="min",rhs=d,sense="="))
-vars = matrix(result$x,nrow=m,byrow=TRUE)
-total_cost = result$objval
-duals = result$pi #duals variables - cost charged by 3rd party logistics firm
+# Enter necessary parameters into gurobi function as described in report
 
+result = gurobi(
+	list(A=A,
+	obj=c,
+	modelsense="min",
+	rhs=d,
+	sense="="
+	)
+)
 
-#non normalised version - vars is the same up to multiplication by 1500
+# Isolate certain outputs from gurobi result and interpret them accordingly 
+
+vars = matrix(result$x,nrow=m,byrow=TRUE) # What we think of in the report as pi - The amount transported between i (rows) and j (columns) directly
+total_cost = result$objval # Total cost of transportation
+duals = result$pi #duals variables - cost charged by 3rd party logistics firm # Dual variables - v in the report
+
+# WE NOW PRESENT ANOTHER METHOD TO SHOW THAT ALL VARIABLES ARE THE SAME UP TO POSITIVE LINEAR TRANSFORMATIONS
+# THIS TELLS US THAT FOR PRACTICAL APPLICATIONS, WE DO NOT NEED TO NORMALISE OUR DISTRIBUTIONS TO 1
+
+# Non normalised version
 
 pfull = c(350,665,485)
 qfull = c(134,357,412,87,125,165,220)
 dfull = c(pfull,qfull)
 
-resultfull = gurobi(list(A=A,obj=Phi,modelsense="min",rhs=dfull,sense="="))
+resultfull = gurobi(
+	list(A=A,
+	obj=Phi,
+	modelsense="min",
+	rhs=dfull,
+	sense="="
+	)
+)
+
+# The user can compare the outputs isolated below to the ones derived above and check that they are equal up to a positive linear transform
+
 varsfull = matrix(resultfull$x,nrow=m,byrow=TRUE)
 total_costfull = resultfull$objval
 dualsfull = resultfull$pi #duals variables - cost charged by 3rd party logistics firm
+
+# Isolating duals for supply depot and shop respectively and proving that the complementary slackness conditions hold
 
 u = duals[1:length(pfull)]
 v = duals[(length(pfull)+1):length(dfull)]
