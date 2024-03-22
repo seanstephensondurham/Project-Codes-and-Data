@@ -1,1 +1,112 @@
-PLACEHOLDER
+# --------------------------- COUNTY DURHAM VORONOI CODE ---------------------------
+# --- USER REQUIRED TO DOWNLOAD RELEVANT DATA FILES PRIOR TO RUNNING THE PROGRAM ---
+# ----- FILES REQUIRED: "CDV OUTLINE COORDINATES", "CDV POSTCODE COORDINATES" ------
+# -------- CHANGE FILE DIRECTORY LINES BELOW TO ACCESS CHOSEN FILE LOCATION --------
+
+
+library("transport")
+library("geometry")
+library("ptinpoly")
+library("tidyverse")
+library("ggplot2")
+library("remotes")
+library("ptools")
+library("sp")
+
+# IMPORTING DATA - files can be found in relevant Github folder
+
+postcode_coors = read.csv(paste0(thePath,"/postcode data durham.csv"),sep=",",header=TRUE)
+
+postcode_coorsy = postcode_coors[,1]
+postcode_coorsx = postcode_coors[,2]
+
+boundary_coors = read.csv(paste0(thePath,"/durham outline data.csv"),sep=",",header=TRUE)
+
+boundary_coorsx = boundary_coors[,1]
+boundary_coorsy = boundary_coors[,2]
+
+n = 7 # desired number of polygons (constituencies with equal population)
+pop = length(postcode_coorsx) # population value (in this example each point represents approx. 10 residents) 
+popx = postcode_coorsx
+popy = postcode_coorsy
+iter = 0
+
+# introduce small variation in loaded data too account for slight differences in location of individual households within a postcode
+
+epsilonx = runif(pop,-0.00001,0.00001)
+epsilony = runif(pop,-0.00001,0.00001)
+epsilon = cbind2(epsilonx,epsilony)
+
+varied_population = postcode_coors + epsilon
+
+popy = varied_population[,1]
+popx = varied_population[,2]
+
+# centroid coordinates need to be defined before algorithm so that each original polygon has at least 1 member of population located in it - avoids errors that sometimes occur if centroids defined randomly
+
+centroidsx = c(-1.35,-1.59,-1.76,-1.59,-1.61,-1.82,-1.92)
+centroidsy = c(54.77,54.61,54.72,54.79,54.86,54.86,54.54)
+
+weights = rep(0,n)
+
+postcode_coors = cbind2(popx,popy)
+
+cell_members = rep(0,n)
+diff = pop
+tuning = 0.01 # tuning parameter for speed of convergence of weight functions - too large a value will result in no convergence
+
+data = SpatialPointsDataFrame(postcode_coors, data.frame(x = popx, y = popy) , bbox = NULL) # constructing data in certain form for use in certain functions later
+
+# limit on max iterations of algorithm and desired range of resulting cell populations can be changed to fit a specific objective - balance between accuracy and time
+
+while (iter < 1000 && diff > 10){
+
+	pwd = power_diagram(centroidsx,centroidsy,weights,rect=c(-2.6,-1.1,54,55)) # constructs power diagram
+	cell_members = rep(0,n)
+	poly_list = NULL
+
+  # the count_xy function we use later requires the data to be constructed in a certain way, hence the use of SpatialPolygons() and SpatialPointsDataFrame() functions
+
+	for (i in 1:n){ # construct list of polygons in certain form - makes calculating weight functions faster
+		poly_list = append(poly_list,Polygons(list(Polygon(pwd$cells[[i]])),i))
+	}
+
+	Spa_poly = SpatialPolygons(poly_list,1:n)
+
+	cell_members = count_xy(Spa_poly,data,weight=1) # counts the number of population in each cell
+
+	# see report for reasoning behind weight function used - method of descent - weight function changes dependent on the population of each cell
+
+	for (i in which(cell_members > pop/n)){ # in this example we choose to edit only those weights for which the corresponding cell has population larger than desired
+		weights[i] = weights[i] - (tuning * exp( (cell_members[i]/(pop/n)) - 1 ))^2
+	}
+
+	iter = iter + 1
+	diff = max(cell_members) - min(cell_members)
+  # Can unhash the following lines to monitor convergence of the code whilst it is running
+	#print(cell_members) 
+	#print(diff)
+	if (diff < 1000){tuning = 0.005} # smaller tuning parameters as algorithm converges to aim
+	if (diff < 200){tuning = 0.001}
+}
+
+# formatting county outline data for visualisation of the results
+
+outlines_poly = Polygon(boundary_coors)
+outlines_poly = Polygons(list(outlines_poly),n+1)
+outlines_poly = SpatialPolygons(append(poly_list,outlines_poly),1:(n+1))
+
+# Plots coloured voronoi diagram and then overlays the boundaries of the cells and county
+
+plot(Spa_poly,col=2:7,pbg="white")
+par(new=TRUE)
+#points(postcode_coors)
+#plot( x = postcode_coorsx ,y = postcode_coorsy ,pch = 20, cex = 0.001)
+#par(new=TRUE)
+plot(outlines_poly)
+
+# options to print population per cell as well as the number of cells which lie inside a certain range around the target population per cell
+#print(cell_members)
+#print(length(which(cell_members < (pop/n)*1.1 & cell_members > (pop/n)*0.9)))
+
+
