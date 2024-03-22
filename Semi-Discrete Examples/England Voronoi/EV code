@@ -1,1 +1,128 @@
-PLACEHOLDER
+# ------------------------------------------ ENGLAND VORONOI CODE ------------------------------------------
+# --------------- USER REQUIRED TO DOWNLOAD RELEVANT DATA FILES PRIOR TO RUNNING THE PROGRAM ---------------
+# -- FILES REQUIRED: "EV OUTLINE COORDINATES", "ENGLAND POSTCODES POP1.CSV", "ENGLAND POSTCODES POP2.CSV" --
+# -------------------- CHANGE FILE DIRECTORY LINES BELOW TO ACCESS CHOSEN FILE LOCATION --------------------
+
+
+library("transport")
+library("geometry")
+library("ptinpoly")
+library("tidyverse")
+library("remotes")
+library("ptools")
+library("sf")
+library("sp")
+library("data.table")
+
+# Loads rough approximation of the boundary coordinates of England
+# Not completely accurate around certain parts of the coastline
+# Used to give a rough idea of how the cells align within the country
+
+boundary_coors = fread("england outline.csv")
+boundary_coorsx = boundary_coors[,1]
+boundary_coorsy = boundary_coors[,2]
+
+# Data is formatted as follows:
+
+# P.code Y coordinate || P.code X coordinate || P.code population 
+#       53.524067     ||      -1.627575      ||        69
+
+# Note the difference in how we format data compared to County Durham example.
+# This is because of the larger data set in this case, meaning to run a point-by-point projection
+# onto the set of cells would take too much time - hence we group individuals by postcode
+
+population_data1 = fread("england postcodes pop1.csv")
+population_data2 = fread("england postcodes pop2.csv")
+population_data = rbind(population_data1,population_data2)
+
+# Centroids for the cells of the Voronoi diagram
+# Chosen to be roughly distributed according to largest population centres
+
+centroids = read.csv(paste0(thePath,"/england centroids.csv"),sep=",",header=FALSE)
+
+n = dim(centroids)[1]
+pop = sum(population_data[,3])
+popx = population_data[,2]
+popy = population_data[,1]
+pop_per_coor = as.matrix(population_data[,3]) # Isolated as separate vector for faster read/write later
+iter = 0
+
+centroidsx = centroids[,2]
+centroidsy = centroids[,1]
+
+# Weights are read from a separate file
+# Due to size of data set, the simulation was run over multiple sessions
+# Hence, after each session, the values of weight function calculated up to that point are saved in this file
+
+weights = c(read.csv(paste0(thePath,"/england weights.csv"),sep=",",header=FALSE))$V1
+
+postcode_coors = cbind2(popx,popy)
+
+cell_members = rep(0,n)
+diff = pop
+tuning = 0.17 # This can be varied to change the rate of convergence, however too high a value leads to divergence
+iter = 0
+
+# Formatting the postcode coordinates in a specific data frame for use later
+data = SpatialPointsDataFrame(postcode_coors, data.frame(x = popx, y = popy) , bbox = NULL)
+
+while (iter < 1000 && diff > 60000){
+	ticker = 0
+	pwd = power_diagram(centroidsx,centroidsy,weights,rect=c(-7,3,49,56)) # Computes pwd given weights and centroids
+	cell_members = rep(0,n)
+
+	# Creates certain class of object consisting of all cells (polygons) for use later
+	poly_list = NULL
+	for (i in 1:n){
+		if (is.na(pwd$cells[i]) == FALSE){
+			ticker = ticker + 1
+			poly_list = append(poly_list,Polygons(list(Polygon(pwd$cells[[i]])),ticker))
+		}
+	}
+
+	Spa_poly = SpatialPolygons(poly_list,1:ticker)
+
+	# Note the use of over() rather than count_xy() when compared to County Durham example
+	# over() gives a point by point projection rather than grouping all points within a cell 
+	# and returning that value (as with count_xy()).
+	# This means we can then take the cell a point lies in and that points population to the cell_members entry for that cell.
+
+	holder = matrix(over(data,Spa_poly))
+	for (i in 1:length(holder)){
+		cell_members[holder[i]] = cell_members[holder[i]] + pop_per_coor[i]
+	}
+
+	# Due to the size of the data set, computing weights for all cells (not just those with larger populations
+	# as in the Durham example) means we get faster convergence in general.
+	# Note the use of cubic here to allow for the fact that cell_members/(pop/n) - 1 can be negative for certain i
+
+	for (i in 1:n){
+		weights[i] = weights[i] - (tuning *  (cell_members[i]/(pop/n) - 1 ))^3
+	}
+
+	iter = iter + 1
+	diff = max(cell_members) - min(cell_members)	
+	print(iter)
+	print(ticker)
+	print(diff)
+	#print(min(cell_members))
+}
+
+# Formats the outline of england - roughly plotted - coastline has certain innacuracies
+# but we use it purely for reference so this is not important
+
+outlines_poly = Polygon(boundary_coors)
+outlines_poly = Polygons(list(outlines_poly),ticker+1)
+outlines_poly = SpatialPolygons(append(poly_list,outlines_poly),1:(ticker+1))
+
+# Plots coloured voronoi and then overlays transparent plot of boundaries
+plot(Spa_poly,col=2:7,pbg="white")
+par(new=TRUE)
+#points(postcode_coors)
+#plot( x = postcode_coorsx ,y = postcode_coorsy ,pch = 20, cex = 0.001)
+#par(new=TRUE)
+plot(outlines_poly)
+
+# Options to check population of each cell and how many cells fall within certain parameters
+#print(cell_members)
+#print(length(which(cell_members < (pop/n)*1.1 & cell_members > (pop/n)*0.9)))
