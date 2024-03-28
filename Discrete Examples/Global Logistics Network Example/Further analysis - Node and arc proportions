@@ -1,0 +1,186 @@
+library("gurobi")
+library("Matrix")
+library("stringi")
+library("data.table")
+
+fa = function(x,w,s){
+	y = (1000 + x)*ceiling(w/30000)
+	return(y)
+}
+
+fb = function(x,w,s){
+	y = (50 + 5*x*(5*s)^2)*(w/40000)
+	return(y)
+}
+
+fra = function(x,w,s){
+	y = (10 + 9*x*(3*s)^2)*ceiling(w/60000)
+	return(y)
+}
+
+fro = function(x,w,s){
+	y = (20 + 10*s*x)*ceiling(w/40000)
+	return(y)
+}
+
+w = 10000
+
+
+change = 1000
+
+route = NULL
+
+nodes = fread("Transport nodes.csv")
+number_of_nodes = dim(nodes)[1]
+arcs = as.matrix(read.csv(paste0(getwd(),"/Transport arc distances.csv"),sep=";",header=FALSE))
+number_of_arcs = dim(arcs)[1]
+
+arcs_copy = arcs
+
+		
+Nabla = replicate(number_of_nodes,numeric(number_of_arcs))
+
+for (i in 1:number_of_arcs){
+	Nabla[i,arcs[i,1]] = -1
+	Nabla[i,arcs[i,2]] = 1
+}
+
+Phi = arcs[,3]
+
+number_of_samples = 100000
+
+start = sample(number_of_nodes,number_of_samples,replace = TRUE)
+destination = sample(number_of_nodes,number_of_samples,replace = TRUE)
+for (i in 1:number_of_samples){
+	if (start[i] == destination[i]){
+		if (start[i] != 1){
+			start[i] = start[i] - 1
+		} else {start[i] = start[i] + 1}
+	}
+}
+
+node_visits = matrix(rep(0,6*number_of_nodes),ncol = 6)
+
+transportcount = matrix(rep(0,30),ncol=5) # B,Ro,Ra,A,Change
+s_range = c(0.05,0.1,0.15,0.2,0.25,0.3)
+
+for (m in 1:6){
+	s = s_range[m]
+	for (i in 1:number_of_arcs){
+		if (arcs[i,3] != 1){	
+			if (nodes$Mode[arcs[i,1]] == "(B)"){
+				arcs_copy[i,3] = fb(arcs[i,3],w,s)
+			} else if (nodes$Mode[arcs[i,1]] == "(Ro)"){
+				arcs_copy[i,3] = fro(arcs[i,3],w,s)
+			} else if (nodes$Mode[arcs[i,1]] == "(Ra)"){
+				arcs_copy[i,3] = fra(arcs[i,3],w,s)
+			} else if (nodes$Mode[arcs[i,1]] == "(A)"){
+				arcs_copy[i,3] = fa(arcs[i,3],w,s)
+			}
+		} else {arcs_copy[i,3] = change}
+	}
+	Phi = arcs_copy[,3]
+	for (k in 1:number_of_samples){
+		print(m)
+		print(k)
+		n = rep(0,number_of_nodes)	
+		n[c(start[k],destination[k])]=c(-1,1)
+		result = gurobi(list(A = t(Nabla),obj=Phi,modelsense="min",rhs=n,sense="=",start = matrix(0,number_of_arcs,1)),params=NULL)
+		eqpath = which(result$x > 0)
+		arrived = FALSE
+		vnodes = 0
+		i = start[k]
+		pnode = nodes[i,1]
+		cnode = nodes[i,1]
+		while(arrived == FALSE){
+			node_visits[i,m] = node_visits[i,m] + 1
+			leavingi = which(Nabla[,i] == -1)
+			a = intersect(eqpath,leavingi)[1]
+			j = which(Nabla[a,] == 1)[1]
+			pnode = cnode
+			cnode = nodes$Node[j]
+			if (isTRUE(substr(pnode,1,4) == substr(cnode,1,4))){
+				transportcount[m,5] = transportcount[m,5] + 1
+			} else {
+				mode = nodes$Mode[j]
+				if (mode == "(B)"){
+					transportcount[m,1] = transportcount[m,1] + 1
+				} else if (mode == "(Ro)"){
+					transportcount[m,2] = transportcount[m,2] + 1
+				} else if (mode == "(Ra)"){
+					transportcount[m,3] = transportcount[m,3] + 1
+				} else {
+					transportcount[m,4] = transportcount[m,4] + 1
+				}
+			}	
+			i = j
+			if (j == destination[k]){
+				arrived = TRUE
+			}
+		}
+	}
+}
+
+
+transportcount_p = matrix(rep(0,30),ncol=5)
+for (i in 1:6){transportcount_p[i,] = transportcount[i,] / sum(transportcount[i,])}
+
+node_visits = as.matrix(cbind(nodes,node_visits))
+
+most_visited = matrix(rep(0,180),ncol = 18)
+for (i in 1:6){
+	index = rep(0,10)
+	holder = sort(node_visits[,i+2])[636:645]
+	for (j in 1:10){
+		index[j] = which(node_visits[,i+2] == holder[j])[1]
+		most_visited[(11-j),(3*(i-1)+1):(3*(i-1)+2)] = as.matrix(nodes[index[j],1:2])
+		most_visited[(11-j),(3*(i-1)+3)] = holder[j]
+	}
+}
+
+mvb = matrix(rep(0,180),ncol = 18)
+mvra = matrix(rep(0,180),ncol = 18)
+mvro = matrix(rep(0,180),ncol = 18)
+mva = matrix(rep(0,180),ncol = 18)
+
+for (i in 1:6){
+	index = rep(0,10)
+	holder = sort(node_visits[1:150,i+2])[141:150]
+	for (j in 1:10){
+		index[j] = which(node_visits[1:150,i+2] == holder[j])[1]
+		mvb[(11-j),(3*(i-1)+1):(3*(i-1)+2)] = as.matrix(nodes[index[j],1:2])
+		mvb[(11-j),(3*(i-1)+3)] = holder[j]
+	}
+}
+
+
+for (i in 1:6){
+	index = rep(0,10)
+	holder = sort(node_visits[151:331,i+2])[172:181]
+	for (j in 1:10){
+		index[j] = which(node_visits[151:331,i+2] == holder[j])[1]
+		mvra[(11-j),(3*(i-1)+1):(3*(i-1)+2)] = as.matrix(nodes[(150+index[j]),1:2])
+		mvra[(11-j),(3*(i-1)+3)] = holder[j]
+	}
+}
+
+
+for (i in 1:6){
+	index = rep(0,10)
+	holder = sort(node_visits[332:605,i+2])[265:274]
+	for (j in 1:10){
+		index[j] = which(node_visits[332:605,i+2] == holder[j])[1]
+		mvro[(11-j),(3*(i-1)+1):(3*(i-1)+2)] = as.matrix(nodes[(331+index[j]),1:2])
+		mvro[(11-j),(3*(i-1)+3)] = holder[j]
+	}
+}
+
+for (i in 1:6){
+	index = rep(0,10)
+	holder = sort(node_visits[606:645,i+2])[31:40]
+	for (j in 1:10){
+		index[j] = which(node_visits[606:645,i+2] == holder[j])[1]
+		mva[(11-j),(3*(i-1)+1):(3*(i-1)+2)] = as.matrix(nodes[(605+index[j]),1:2])
+		mva[(11-j),(3*(i-1)+3)] = holder[j]
+	}
+}
