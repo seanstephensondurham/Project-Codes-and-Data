@@ -1,0 +1,56 @@
+library("transport")
+library("geometry")
+library("ptinpoly")
+library("tidyverse")
+library("remotes")
+library("ptools")
+library("sf")
+library("sp")
+library("data.table")
+
+weights = as.matrix(fread("england weights.csv"))
+centroids = as.matrix(fread("england centroids.csv"))
+centroidsx = centroids[,2]
+centroidsy = centroids[,1]
+
+pwd = power_diagram(centroidsx,centroidsy,weights,rect=c(-7,3,49,56))
+
+n = length(centroidsx)
+
+ward_data = as.matrix(fread("votes by constituency ward.csv"))
+
+wardx = as.numeric(ward_data[,1])
+wardy = as.numeric(ward_data[,2])
+wardv = matrix(as.numeric(ward_data[,10:14]),ncol=5)
+
+ward_coor = SpatialPointsDataFrame(cbind2(wardx,wardy),data.frame(x=wardx,y=wardy),bbox=NULL)
+poly_list=NULL
+for (i in 1:n){
+	poly_list = append(poly_list,Polygons(list(Polygon(pwd$cells[[i]])),i))
+}
+
+Spa_poly = SpatialPolygons(poly_list,1:n)
+
+holder = matrix(over(ward_coor,Spa_poly))
+cellv = matrix(0,n,5)
+
+for (i in 1:length(holder)){
+	inc = holder[i]
+	cellv[inc,] = cellv[inc,] + wardv[i,]
+}
+
+win = rep(NULL,n)
+for (i in 1:n){
+	j = which(cellv[i,] == max(cellv[i,]))
+	if (j == 1){win[i] = "Con"}
+	else if (j == 2){win[i] = "Lab"}
+	else if (j == 3){win[i] = "Dem"}
+	else if (j == 4){win[i] = "Grn"}
+	else {win[i] = "Oth"}
+}
+	
+Conc = length(which(win == "Con"))
+Labc = length(which(win == "Lab"))
+Demc = length(which(win == "Dem"))
+Grnc = length(which(win == "Grn"))
+Othc = length(which(win == "Oth"))
