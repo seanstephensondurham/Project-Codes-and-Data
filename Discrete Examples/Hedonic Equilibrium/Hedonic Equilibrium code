@@ -1,0 +1,92 @@
+# ---------- HEDONIC EQUILIBRIUM EXAMPLE CODE ----------
+# -------------- GUROBI SOFTWARE REQUIRED --------------
+
+library("gurobi","Matrix")
+
+X = 6
+Z = 8
+Y = 50
+
+
+p = rep(1/X,X)
+q = rep(1/Y,Y)
+
+nodes = X+Y+Z
+arcs = nodes * nodes
+n = c(-p,rep(0,Z),q)
+
+XX = matrix(rep(0,X*X),nrow = X)
+XZ = matrix(runif(X*Z,0,1),nrow = X)
+XY = matrix(rep(0,X*Y),nrow = X)
+ZX = matrix(rep(0,Z*X),nrow = Z)
+ZZ = matrix(rep(0,Z*Z),nrow = Z)
+ZY = matrix(runif(Z*Y,0,1),nrow = Z)
+YX = matrix(rep(0,Y*X),nrow = Y)
+YZ = matrix(rep(0,Y*Z),nrow = Y)
+YY = matrix(rep(0,Y*Y),nrow = Y)
+
+PhiX = cbind(XX,XZ,XY)
+PhiZ = cbind(ZX,ZZ,-ZY)
+PhiY = cbind(YX,YZ,YY)
+
+Phi = rbind(PhiX,PhiZ,PhiY)
+
+NablaXX = matrix(0,X*nodes,X)
+NablaXZ = matrix(0,X*nodes,Z)
+NablaXY = matrix(0,X*nodes,Y)
+NablaZX = matrix(0,Z*nodes,X)
+NablaZZ = matrix(0,Z*nodes,Z)
+NablaZY = matrix(0,Z*nodes,Y)
+NablaYX = matrix(0,Y*nodes,X)
+NablaYZ = matrix(0,Y*nodes,Z)
+NablaYY = matrix(0,Y*nodes,Y)
+
+for (i in 1:X){
+	for (j in 1:Z){
+		NablaXX[((i-1)*nodes) + X + j , i ] = -1
+		NablaXZ[((i-1)*nodes) + X + j , j ] = 1
+	}	
+}
+
+for (i in 1:Z){
+	for (j in 1:Y){
+		NablaZZ[((i-1)*nodes) + X + Z + j , i ] = -1
+		NablaZY[((i-1)*nodes) + X + Z + j , j ] = 1
+	}
+}
+
+NablaX = cbind(NablaXX,NablaXZ,NablaXY)
+NablaZ = cbind(NablaZX,NablaZZ,NablaZY)
+NablaY = cbind(NablaYX,NablaYZ,NablaYY)
+
+Nabla = rbind(NablaX,NablaZ,NablaY)
+
+result = gurobi(
+	list(
+		A = t(Nabla),
+		obj = c(t(Phi)),
+		modelsense = "min",
+		rhs = n,
+		sense = "="
+	),
+	params = NULL
+)
+
+u_x = -result$pi[1:X]
+w_z = result$pi[(X+1):(X+Z)]
+v_y = result$pi[(X+Z+1):nodes]
+
+check_u = rep(0,X)
+check_v = rep(0,Y)
+
+u_w = XZ - matrix(rep(w_z,X),nrow=X,byrow=TRUE)
+v_w = matrix(rep(w_z,Y),ncol=Y,byrow=FALSE) - ZY
+
+for (i in 1:X){
+	check_u[i] = min(u_w[i,])
+}
+
+for (j in 1:Y){
+	check_v[j] = min(v_w[,j])
+}
+
